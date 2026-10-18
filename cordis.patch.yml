@@ -1,0 +1,9 @@
+# dsh-dania-voice — bundle patch
+#
+# 把插件插入当前 profile 的配置树。
+# 本地开发安装：
+#   dsh plugin --profile web add link:C:/Users/Administrator/.dsh/profiles/desktop/plugins/dsh-dania-voice
+
+- insert:
+    - id: dania-voice
+      name: dsh-dania-voice

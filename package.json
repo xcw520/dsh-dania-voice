@@ -1,0 +1,51 @@
+{
+  "name": "dsh-dania-voice",
+  "version": "1.0.0",
+  "description": "达妮娅（鸣潮）语音朗读 — 用本地 GPT-SoVITS 把助手回复读出来，带一个可拖动的小挂件开关。 / Local GPT-SoVITS voice for DSH: reads assistant replies aloud with a draggable mascot toggle.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "tts",
+    "voice",
+    "gpt-sovits",
+    "wuthering-waves",
+    "dania"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "icon": "./icon.png",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "scripts",
+    "assets",
+    "icon.png",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "manifestVersion": 1
+  },
+  "engines": {
+    "dsh": ">=0.1.7-rc.1 <0.3.0-0"
+  },
+  "license": "MIT",
+  "author": "夜游人",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xcw520/dsh-dania-voice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xcw520/dsh-dania-voice/issues"
+  },
+  "homepage": "https://github.com/xcw520/dsh-dania-voice#readme",
+  "scripts": {
+    "install-voice": "node scripts/install.mjs"
+  }
+}
