@@ -4,3 +4,8 @@ node_modules/
 Thumbs.db
 downloads/
 venv/
+
+# 凭据永远不要进仓库
+.npmrc
+.env
+.env.*
