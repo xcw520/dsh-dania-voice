@@ -76,3 +76,47 @@ test('全大写长词转小写，短缩写保留', () => {
   assert.equal(cleanForSpeech('`PTC`'), 'PTC')
   assert.equal(cleanForSpeech('`HTTP`'), 'HTTP')
 })
+
+test('行内代码里整段是网址时丢掉，不留反引号', () => {
+  const out = cleanForSpeech('看 `https://github.com/RVC-Boss/GPT-SoVITS` 这个仓库')
+  assert.ok(!out.includes('http'), `还留着网址：${out}`)
+  assert.ok(!out.includes('`'), `还留着反引号：${out}`)
+  assert.match(out, /看\s+这个仓库/)
+})
+
+test('裸网址同样丢掉', () => {
+  const out = cleanForSpeech('打开 https://example.com/a?b=1 看看')
+  assert.ok(!out.includes('example'), `还留着网址：${out}`)
+  assert.match(out, /打开\s+看看/)
+})
+
+test('www 开头的网址也丢掉', () => {
+  const out = cleanForSpeech('去 www.example.com 查')
+  assert.ok(!out.includes('example'))
+})
+
+test('列表项之间补句号，不会念成一长串', () => {
+  const out = cleanForSpeech('- 行内代码转英文\n- 代码块给一句交代\n- 强调标记只删成对的')
+  assert.match(out, /行内代码转英文。/)
+  assert.match(out, /代码块给一句交代。/)
+  // 原来这三条会被拼成「行内代码转英文代码块给一句交代强调标记只删成对的」
+  assert.ok(!out.includes('英文代码'), `还是粘在一起：${out}`)
+})
+
+test('标题后面补句号，和正文断开', () => {
+  const out = cleanForSpeech('## 还没查清的\n\n正文在这里。')
+  assert.match(out, /还没查清的。/)
+  assert.match(out, /正文在这里/)
+})
+
+test('表格行删干净，不留空行和多余句号', () => {
+  const out = cleanForSpeech('注释写错了。\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n另一件事')
+  assert.ok(!out.includes('。。'), `有双句号：${out}`)
+  assert.equal(out, '注释写错了。\n另一件事')
+})
+
+test('默认分段上限是 90 字', () => {
+  const long = '这是一句话。'.repeat(60)
+  const segs = splitSegments(cleanForSpeech(long))
+  for (const s of segs) assert.ok(s.length <= 90, `超长段 ${s.length} 字：${s}`)
+})

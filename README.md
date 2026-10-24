@@ -14,7 +14,7 @@ DSH session events (assistant/message + turn/end)
       │  take the reply text: inline code → speakable English,
       │  code blocks → one short cue, tables and links stripped
       ▼
-Host: clean + merge into ≤120-char segments
+Host: clean + merge into ≤90-char segments
       │  POST http://127.0.0.1:9880/tts
       ▼
 GPT-SoVITS api_v2.py (local, GPU)
@@ -91,6 +91,23 @@ patch works too and is overridden by the panel.
 | `pythonPath` / `root` / `cacheDir` | derived | Only needed for a hand-made install |
 | `baseUrl` | `http://127.0.0.1:9880` | GPT-SoVITS endpoint |
 | `autostart` | `true` | Start the service when needed |
+
+## Known limitations
+
+**Short English tokens sound mushy.** A full English sentence comes out fine — transcribing a
+synthesised sentence back gives an almost exact match. But short identifiers or ones with digits
+(`ops bash`, `cut2`, `sha1`) come out close to Chinese syllables, as if the voice were mumbling.
+That is a mismatch between the voice model and English phonemes, not something the plugin can
+fix. Inline code is still turned into speakable English; longer identifiers fare better than short ones.
+
+**A segment is capped at 90 characters.** The server's generation loop is hard-coded to 1500
+semantic tokens (~30 s); past that it stops silently and truncates. With 147 characters in one
+unsegmented request, a whole sentence went missing in testing. 90 leaves about 30% headroom, at
+the cost of more pauses between segments.
+
+**URLs and tables are not spoken.** A URL reads as a string of letters nobody can follow, and a
+table reads as a list of numbers; both are dropped. The dropped spot is closed with a full stop so
+the neighbouring sentences are not glued together.
 
 ## Troubleshooting
 

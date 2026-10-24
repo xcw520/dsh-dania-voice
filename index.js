@@ -44,11 +44,23 @@ const STATE_DIRNAME = 'dania-voice'
  * 单轮朗读的总字数上限。
  *
  * 它只是防呆闸：常见回复（几百到一千多字）都在这以内，会完整读完；
- * 真正的分段由 {@link splitSegments} 按 120 字切，逐段入队、边合成边播。
+ * 真正的分段由 {@link splitSegments} 按 90 字切，逐段入队、边合成边播。
  */
 const MAX_CHARS = 4000
-/** 一段最长多少字。宁长勿短：短句各自独立合成会让语调断裂、气音变多。 */
-const SEGMENT_CHARS = 120
+/**
+ * 一段最长多少字。
+ *
+ * 90 这个数是从服务端的上限倒推的：GPT-SoVITS 的 t2s 生成循环写死
+ * `for _ in tqdm(range(1500))`，每秒 50 个语义 token，也就是单次请求最多
+ * 30 秒语音。超了不报错、不提示，直接截断——实测 147 字不切段时，音频
+ * 停在 30.5 秒，中间整整少读了一句。
+ *
+ * 中文约 4.5~5 字/秒，90 字最坏情况 20 秒出头，离 30 秒留了三成余量。
+ * 以前设 120，最坏会到 27~29 秒，贴着上限跑，标点多的段落偶尔就翻车。
+ *
+ * 代价是段变短、句间停顿变多；宁可多停一下，不要丢字。
+ */
+const SEGMENT_CHARS = 90
 /** 队列里保留多少条，够浏览器追上即可。 */
 const QUEUE_KEEP = 40
 /** 单次 /tts 请求超时。 */
@@ -92,7 +104,14 @@ export const DEFAULTS = {
   repetitionPenalty: 1.35,
   /** 句间停顿（秒）。太短会显得赶。 */
   fragmentInterval: 0.4,
-  /** 服务端的切句方式；cut2 按标点切，配合我们自己的聚合更稳。 */
+  /**
+   * 服务端的切句方式。
+   *
+   * 名字有误导性：cut2 不是「按标点切」。看 text_segmentation_method.py 的实现
+   * 是「先按标点断句，再凑够 50 字打包成一段」。它比 cut0（完全不切）安全，
+   * cut0 时整段只推理一次，长文本会撞上 1500 token 的硬上限（约 30 秒），
+   * 实测 147 字不切段时中间整整少了一句。cut5 按每个标点切，停顿最多、语速最慢。
+   */
   textSplitMethod: 'cut2',
 }
 
@@ -166,11 +185,17 @@ const CODE_BLOCK_TEXT = '这里有一段代码。'
  * 两截，是跳字最直接的来源；可原样送进 GPT-SoVITS 也不行，它的中文前端会把英文
  * 拆成逐个字母念（实测 `GPT-SoVITS` 变成 `G P T- So V I T S`）。
  * 折中做法：把标识符还原成空格分隔的单词，让它可以被当成英文词读。
+ *
+ * URL 是例外，直接丢掉：`https://github.com/...` 念出来是一串没人听得懂的
+ * 字母和斜杠，实测会变成 "tapsgetupcomer..." 这种噪音，比略过更糟。
  * @param {string} raw - 反引号里的原始内容。
- * @returns {string} 可朗读的英文。
+ * @returns {string} 可朗读的英文；整段是 URL 时返回空串。
  */
 function speakableCode(raw) {
-  return String(raw)
+  const code = String(raw)
+  // 整段是网址或没有可读单词（只有符号/数字）的，不必念。
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(code) || /^www\./i.test(code)) return ''
+  return code
     .replace(/[_/\\]+/g, ' ')
     .replace(/[.*#|~^$<>{}\[\]()]+/g, ' ')
     // 全大写的长词会被 GPT-SoVITS 逐字母念（实测 `EXECUTOR` 变成 E X E C U T O R），
@@ -194,14 +219,28 @@ export function cleanForSpeech(text) {
   return text
     .replace(/```[\s\S]*?```/g, ` ${CODE_BLOCK_TEXT} `)
     .replace(/~~~[\s\S]*?~~~/g, ` ${CODE_BLOCK_TEXT} `)
+    // 网址要在处理行内代码之前删：`https://...` 常被包在反引号里，
+    // 先走反引号那条就会被当标识符念成一串字母。
+    // 结尾不能吃反引号，否则会剩下一只孤零零的 ` 被念出来。
+    .replace(/https?:\/\/[^\s`]+/g, ' ')
+    .replace(/\bwww\.[^\s`]+/g, ' ')
     .replace(/`([^`\n]+)`/g, (_, code) => ` ${speakableCode(code)} `)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/^\s*\|.*\|\s*$/gm, ' ')
+    .replace(/^\s*\|.*\|\s*$/gm, '')
     .replace(/^\s*[-*+]\s+/gm, '')
     .replace(/^\s*\d+[.)]\s+/gm, '')
     .replace(/^\s*#{1,6}\s*/gm, '')
-    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    // 表格行删掉后会留下只有空格的空行，先把行尾空格和空行清干净，
+    // 否则补句号那一步会对着空行加一批莫名其妙的句号。
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    // markdown 的换行对眼睛是排版，对耳朵是停顿。列表项和标题行末尾没有标点，
+    // 直接和下一行拼起来会念成一长串（实测「行内代码转英文代码块给一句交代」
+    // 中间一点缝都没有）。这里给没有句末标点的行补一个句号，让它断开。
+    .replace(/([^\n。！？!?；;…：:」』）)】])\n(?=\S)/g, '$1。\n')
     // 只删成对的强调标记，不碰裸露的 * _ ~：`.dsh-ops-update-*.lock` 里那个星号
     // 是文件名的一部分，删掉会把词粘成一坨。
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
@@ -210,7 +249,6 @@ export function cleanForSpeech(text) {
     .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
     .replace(/[ \t]+/g, ' ')
-    .replace(/\n{2,}/g, '\n')
     .trim()
 }
 
