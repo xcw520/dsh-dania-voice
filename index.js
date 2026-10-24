@@ -153,6 +153,35 @@ export function normalizeConfig(raw) {
 }
 
 /**
+ * 代码块读不出来，但也不该静默跳过：给一句交代，让人知道这里省略了东西。
+ *
+ * 用独立句子而不是括号：GPT-SoVITS 的前端会把括号当标点删掉，写了也念不出来。
+ */
+const CODE_BLOCK_TEXT = '这里有一段代码。'
+
+/**
+ * 把行内代码转成「能念的英文」。
+ *
+ * 反引号里多半是标识符（`ops_bash`、`run_in_background`）。整段删掉会把句子截成
+ * 两截，是跳字最直接的来源；可原样送进 GPT-SoVITS 也不行，它的中文前端会把英文
+ * 拆成逐个字母念（实测 `GPT-SoVITS` 变成 `G P T- So V I T S`）。
+ * 折中做法：把标识符还原成空格分隔的单词，让它可以被当成英文词读。
+ * @param {string} raw - 反引号里的原始内容。
+ * @returns {string} 可朗读的英文。
+ */
+function speakableCode(raw) {
+  return String(raw)
+    .replace(/[_/\\]+/g, ' ')
+    .replace(/[.*#|~^$<>{}\[\]()]+/g, ' ')
+    // 全大写的长词会被 GPT-SoVITS 逐字母念（实测 `EXECUTOR` 变成 E X E C U T O R），
+    // 转小写让它按单词读。三个字母以内的缩写（PTC、HTTP、CPU）逐字母念本来就是对的，
+    // 留着别动。
+    .replace(/\b[A-Z]{5,}\b/g, (word) => word.toLowerCase())
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * 把 markdown 正文处理成「能念」的纯文本。
  *
  * 助手回复里大量内容是代码块、表格、链接、列表符号，直接念会非常难听，所以这里
@@ -163,9 +192,9 @@ export function normalizeConfig(raw) {
 export function cleanForSpeech(text) {
   if (typeof text !== 'string') return ''
   return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/~~~[\s\S]*?~~~/g, ' ')
-    .replace(/`([^`]*)`/g, ' ')
+    .replace(/```[\s\S]*?```/g, ` ${CODE_BLOCK_TEXT} `)
+    .replace(/~~~[\s\S]*?~~~/g, ` ${CODE_BLOCK_TEXT} `)
+    .replace(/`([^`\n]+)`/g, (_, code) => ` ${speakableCode(code)} `)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/^\s*\|.*\|\s*$/gm, ' ')
@@ -173,7 +202,12 @@ export function cleanForSpeech(text) {
     .replace(/^\s*\d+[.)]\s+/gm, '')
     .replace(/^\s*#{1,6}\s*/gm, '')
     .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/[*_~]{1,3}/g, '')
+    // 只删成对的强调标记，不碰裸露的 * _ ~：`.dsh-ops-update-*.lock` 里那个星号
+    // 是文件名的一部分，删掉会把词粘成一坨。
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/~~([^~\n]+)~~/g, '$1')
+    .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{2,}/g, '\n')

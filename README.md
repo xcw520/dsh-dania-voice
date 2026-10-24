@@ -11,7 +11,8 @@ Everything runs on your machine — no audio, no text leaves it.
 
 ```
 DSH session events (assistant/message + turn/end)
-      │  take the final reply text, strip code blocks / tables / links
+      │  take the reply text: inline code → speakable English,
+      │  code blocks → one short cue, tables and links stripped
       ▼
 Host: clean + merge into ≤120-char segments
       │  POST http://127.0.0.1:9880/tts
@@ -24,6 +25,11 @@ Browser: poll /dania-voice/next → Web Audio playback
 
 Playback happens in the browser on purpose: the Host process has no audio device, and the voice
 should come out of **the machine you are actually sitting at**.
+
+When cleaning, inline code is not dropped — `ops_bash` is spoken as `ops bash`, and long
+all-caps words are lowercased so the model reads them as words instead of spelling out
+`E X E C U T O R`. Code blocks become a single spoken cue ("there's a code block here")
+instead of being read line by line.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-dania-voice",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "达妮娅（鸣潮）语音朗读 — 用本地 GPT-SoVITS 把助手回复读出来，带一个可拖动的小挂件开关。 / Local GPT-SoVITS voice for DSH: reads assistant replies aloud with a draggable mascot toggle.",
   "keywords": [
     "dsh",
@@ -46,6 +46,7 @@
   },
   "homepage": "https://github.com/xcw520/dsh-dania-voice#readme",
   "scripts": {
+    "test": "node --test",
     "install-voice": "node scripts/install.mjs"
   }
 }
