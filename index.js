@@ -755,7 +755,8 @@ export function apply(ctx, rawConfig) {
 
   // ── 路由 ──────────────────────────────────────────────────────────────────
   ctx.inject(['webServer'], (scoped) => {
-    /** 只放行本机回环请求。 */
+    /** 本机以外的请求一律拒绝；配置了共享密钥时还需校验身份令牌。 */
+    const authToken = process.env.DANIA_VOICE_TOKEN ?? ''
     const reject = (req, res) => {
       try {
         const connection = typeof scoped.get === 'function' ? scoped.get('connection') : undefined
@@ -776,6 +777,14 @@ export function apply(ctx, rawConfig) {
         res.writeHead(403)
         res.end()
         return true
+      }
+      if (authToken) {
+        const header = String(req.headers['x-dania-voice-token'] ?? '')
+        if (header.length !== authToken.length || header !== authToken) {
+          res.writeHead(401)
+          res.end()
+          return true
+        }
       }
       return false
     }
