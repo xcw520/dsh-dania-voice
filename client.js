@@ -17,7 +17,7 @@
   const ROUTE = '/dania-voice'
   const POLL_MS = 1500
   /** 面板上显示，用来确认浏览器加载的是哪一版脚本。 */
-  const CLIENT_VERSION = 'v15-rope'
+  const CLIENT_VERSION = 'v17-release'
 
   const state = {
     enabled: true,
@@ -26,6 +26,8 @@
     temperature: 0.7,
     fragmentInterval: 0.4,
     serverReady: false,
+    /** 引擎开关：false 表示用户手动停了服务，不会再被自动拉起。 */
+    autostart: true,
     /** 部署是否完成；false 时面板显示「一键部署」。 */
     installed: true,
     installing: false,
@@ -53,6 +55,12 @@
   let nextCursor = null
   /** 被「重载脚本」停掉后，旧实例不再轮询/播放。 */
   let stopped = false
+  /**
+   * 引擎按钮的进行中状态：'' 空闲 / 'start' 启动中 / 'stop' 停止中。
+   * 启动要二三十秒，这期间 tick 每 1.5 秒会 render 一次，不记住状态的话按钮
+   * 会被刷回「可点击」，用户就会连点，后端那边只会回一个已经失效的 bootPromise。
+   */
+  let engineBusy = ''
   window.__DSH_DANIA_VOICE_STOP__ = () => {
     stopped = true
     try {
@@ -185,6 +193,7 @@
         <pre class="log" data-f="log"></pre>
       </div>
       <div class="tuning" data-f="tuning">
+        <button class="mini" data-f="engine">启动服务</button>
         <div class="row"><span class="k">音量</span><span class="v" data-f="vol"></span></div>
         <input type="range" min="0" max="1" step="0.05" data-f="volrange" />
         <div class="row"><span class="k">语速</span><span class="v" data-f="spd"></span></div>
@@ -510,6 +519,16 @@
     q('enabled').className = `v ${!online ? 'bad' : on ? 'ok' : ''}`
     q('server').textContent = state.serverReady ? '已就绪' : (state.speaking > 0 ? '合成中…' : '未启动')
     q('server').className = `v ${state.serverReady ? 'ok' : 'bad'}`
+    const engineBtn = q('engine')
+    if (engineBtn) {
+      if (engineBusy) {
+        engineBtn.textContent = engineBusy === 'stop' ? '正在停止…' : '正在启动（约 20~40 秒）…'
+        engineBtn.disabled = true
+      } else {
+        engineBtn.textContent = state.serverReady ? '释放显存' : '启动服务'
+        engineBtn.disabled = !state.installed || state.installing
+      }
+    }
     q('vol').textContent = `${Math.round(state.volume * 100)}%`
     q('spd').textContent = `${state.speed.toFixed(2)}×`
     q('tmp').textContent = state.temperature.toFixed(2)
@@ -530,7 +549,9 @@
       : !state.installed
         ? ''
         : !state.serverReady
-          ? '第一次朗读会先拉起本地 GPT-SoVITS（约 20~40 秒），之后每句只要 1~3 秒。'
+          ? state.autostart
+            ? '第一次朗读会先拉起本地 GPT-SoVITS（约 20~40 秒），之后每句只要 1~3 秒。'
+            : '服务已手动停止，点上面「启动服务」才会拉起。'
           : '回复写完后会自动朗读。点这里可以试听。'
     q('err').textContent = state.lastError || ''
 
@@ -599,6 +620,31 @@
 
   panel.addEventListener('click', async (event) => {
     const target = event.target
+    if (target && target.getAttribute && target.getAttribute('data-f') === 'engine') {
+      unlock()
+      if (engineBusy) return
+      const action = state.serverReady ? 'stop' : 'start'
+      if (action === 'stop') stopPlayback()
+      engineBusy = action
+      render()
+      try {
+        const res = await fetch(`${ROUTE}/service`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action }),
+        })
+        const data = await res.json()
+        state.serverReady = !!data.serverReady
+        state.autostart = !!data.autostart
+        state.lastError = data.ok ? '' : (data.error || '服务操作失败')
+      } catch (error) {
+        state.lastError = `服务操作失败：${error.message}`
+      } finally {
+        engineBusy = ''
+      }
+      render()
+      return
+    }
     if (target && target.getAttribute && target.getAttribute('data-f') === 'repeat') {
       unlock()
       try {

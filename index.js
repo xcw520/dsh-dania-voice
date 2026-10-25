@@ -477,12 +477,12 @@ export function apply(ctx, rawConfig) {
   }
 
   /** 拉起 api_v2.py，并把「已就绪」缓存成 promise 避免并发重入。 */
-  async function ensureServer() {
+  async function ensureServer(force = false) {
     if (await serverReady()) return true
     if (bootPromise) return bootPromise
     const cfg = effective()
     const p = paths()
-    if (!cfg.autostart) {
+    if (!cfg.autostart && !force) {
       lastError = '服务未启动（自动启动已关闭）'
       return false
     }
@@ -554,6 +554,28 @@ export function apply(ctx, rawConfig) {
     })()
 
     return bootPromise
+  }
+
+  /**
+   * 停掉本地服务，把显存还回去。
+   *
+   * 只 kill 不够：api_v2.py 收到终止信号之后还要几百毫秒才松端口，所以以「端口关掉」
+   * 为准。停了之后 bootPromise 必须清掉，否则下次 ensureServer 会拿到一个已经失效的
+   * promise，表现就是「点了启动没反应」。
+   */
+  async function stopServer() {
+    bootPromise = null
+    const child = serverChild
+    serverChild = null
+    if (child) {
+      try { child.kill() } catch { /* already gone */ }
+    }
+    const deadline = Date.now() + 8000
+    while (Date.now() < deadline) {
+      if (!(await serverReady())) return true
+      await sleep(250)
+    }
+    return !(await serverReady())
   }
 
   /** 调一次 /tts，落盘，返回文件名。 */
@@ -956,6 +978,33 @@ export function apply(ctx, rawConfig) {
         }
         const ok = await ensureServer()
         json(res, 200, { ok, error: ok ? '' : lastError })
+      },
+    }))
+
+    // 引擎开关：面板上的「启动服务 / 停止服务」。停的时候顺手把 autostart 写进配置，
+    // 这样 DSH 重启后不会再被预热拉起；点启动再写回 true，随时能恢复。
+    scoped.effect(() => scoped.webServer.register({
+      kind: 'exact',
+      path: `${ROUTE}/service`,
+      handler: async (req, res) => {
+        if (reject(req, res)) return
+        if (req.method !== 'POST') {
+          res.writeHead(405)
+          res.end()
+          return
+        }
+        const body = await readBody(req)
+        const action = body?.action === 'stop' ? 'stop' : 'start'
+        if (action === 'stop') {
+          saveOverrides({ autostart: false })
+          const stopped = await stopServer()
+          lastError = stopped ? '' : '服务没有在 8 秒内退出，再点一次停止'
+          json(res, 200, { ok: stopped, serverReady: !stopped, autostart: false })
+          return
+        }
+        saveOverrides({ autostart: true })
+        const ok = await ensureServer(true)
+        json(res, 200, { ok, serverReady: ok, autostart: true, error: ok ? '' : lastError })
       },
     }))
 
